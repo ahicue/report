@@ -24,6 +24,16 @@ jobs:
       - name: Install dependencies
         run: pip install anthropic
 
+      - name: Check API key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY is NOT set — summaries will use template fallback"
+          else
+            echo "ANTHROPIC_API_KEY is set (length=${#ANTHROPIC_API_KEY})"
+          fi
+
       - name: Push papers
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

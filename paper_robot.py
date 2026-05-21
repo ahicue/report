@@ -535,6 +535,7 @@ def chinese_summary(paper: dict, config: dict) -> dict:
     claude_result = _claude_summary(paper["title"], paper["abstract"])
     if claude_result and all(claude_result.values()):
         print("[INFO] Using Claude summary", file=sys.stderr)
+        claude_result["_source"] = "claude"
         return claude_result
     print("[INFO] Using fallback template (Claude unavailable or incomplete)", file=sys.stderr)
 
@@ -616,7 +617,7 @@ def discord_payload(paper: dict, config: dict) -> dict:
                     {"name": "出版商/平台", "value": trim(chinese_publisher(paper["publisher"]), 250), "inline": True},
                     {"name": "作者", "value": trim(format_authors(paper["authors"]), 250), "inline": False},
                 ],
-                "footer": {"text": "元数据来自 OpenAlex；期刊等级来自本地配置。"},
+                "footer": {"text": "元数据来自 OpenAlex；期刊等级来自本地配置。  摘要: " + ("Claude Haiku" if summary.get("_source") == "claude" else "⚠️ 模板（Claude API 未连接）")},
             }
         ]
     }
