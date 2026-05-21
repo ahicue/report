@@ -531,7 +531,9 @@ def chinese_summary(paper: dict, config: dict) -> dict:
     # Try Claude first
     claude_result = _claude_summary(paper["title"], paper["abstract"])
     if claude_result and all(claude_result.values()):
+        print("[INFO] Using Claude summary", file=sys.stderr)
         return claude_result
+    print("[INFO] Using fallback template (Claude unavailable or incomplete)", file=sys.stderr)
 
     # Fallback: rule-based templates
     raw = summarize_paper(paper, config)
