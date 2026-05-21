@@ -1,0 +1,40 @@
+name: Paper Robot
+
+on:
+  schedule:
+    # Every 30 minutes from 08:00 to 20:00 Asia/Tokyo.
+    - cron: "0,30 23,0,1,2,3,4,5,6,7,8,9,10,11 * * *"
+  workflow_dispatch:
+
+jobs:
+  push-papers:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare config
+        run: cp config.example.json config.json
+
+      - name: Push papers
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          OPENALEX_MAILTO: ${{ secrets.OPENALEX_MAILTO }}
+        run: python paper_robot.py --config config.json
+
+      - name: Persist seen papers
+        run: |
+          git config user.name "paper-robot"
+          git config user.email "paper-robot@example.com"
+          if [ -f data/seen.json ]; then
+            git add data/seen.json
+            git diff --cached --quiet || git commit -m "Update seen papers"
+            git push
+          else
+            echo "No seen-paper state to persist."
+          fi

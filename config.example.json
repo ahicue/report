@@ -1,0 +1,92 @@
+{
+  "queries": [
+    {
+      "name": "Environment + Input-Output",
+      "search": "environmental economics input-output table emissions supply chain",
+      "max_results": 25
+    },
+    {
+      "name": "Labor + Input-Output",
+      "search": "labor economics input-output table employment wage industrial linkage",
+      "max_results": 25
+    },
+    {
+      "name": "Urban + Input-Output",
+      "search": "urban economics input-output table city regional economy infrastructure",
+      "max_results": 25
+    }
+  ],
+  "fresh_days": 730,
+  "max_posts_per_run": 1,
+  "minimum_summary_chars": 400,
+  "minimum_abstract_length": 250,
+  "request_pause_seconds": 1,
+  "core_keywords": [
+    "economics",
+    "economic",
+    "environment",
+    "environmental",
+    "labor",
+    "labour",
+    "employment",
+    "wage",
+    "urban",
+    "city",
+    "regional"
+  ],
+  "field_keywords": [
+    "environmental economics",
+    "carbon emissions",
+    "climate policy",
+    "labor market",
+    "employment",
+    "wage inequality",
+    "urban economics",
+    "regional economics",
+    "city",
+    "transportation",
+    "housing"
+  ],
+  "input_output_keywords": [
+    "input-output",
+    "input output",
+    "IO table",
+    "I-O table",
+    "inter-industry",
+    "industrial linkage",
+    "supply chain",
+    "MRIO",
+    "multi-regional input-output",
+    "Leontief"
+  ],
+  "method_keywords": [
+    "input-output",
+    "multi-regional input-output",
+    "structural decomposition",
+    "decomposition",
+    "difference-in-differences",
+    "instrumental variable",
+    "panel data",
+    "spatial econometric",
+    "general equilibrium",
+    "counterfactual"
+  ],
+  "journal_tiers": {
+    "American Economic Review": "Top 5 / AJG 4*",
+    "Quarterly Journal of Economics": "Top 5 / AJG 4*",
+    "Journal of Political Economy": "Top 5 / AJG 4*",
+    "Econometrica": "Top 5 / AJG 4*",
+    "Review of Economic Studies": "Top 5 / AJG 4*",
+    "Journal of Environmental Economics and Management": "Field top / AJG 4",
+    "Review of Environmental Economics and Policy": "Field top / AJG 4",
+    "Journal of Labor Economics": "Field top / AJG 4",
+    "Labour Economics": "Field journal / AJG 3",
+    "Journal of Urban Economics": "Field top / AJG 4",
+    "Regional Science and Urban Economics": "Field journal / AJG 3",
+    "Economic Systems Research": "Input-output / field journal",
+    "Environment and Planning A: Economy and Space": "Urban/regional / AJG 3",
+    "Ecological Economics": "Environmental / AJG 3",
+    "Energy Economics": "Environmental-energy / AJG 3",
+    "World Development": "Development / AJG 3"
+  }
+}
