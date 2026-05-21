@@ -480,7 +480,7 @@ def _claude_summary(title: str, abstract: str) -> dict | None:
         return None
     try:
         client = _anthropic.Anthropic(api_key=api_key)
-        prompt = _SUMMARY_PROMPT.format(title=title, abstract=abstract)
+        prompt = _SUMMARY_PROMPT.replace("{title}", title).replace("{abstract}", abstract)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1200,
@@ -489,7 +489,7 @@ def _claude_summary(title: str, abstract: str) -> dict | None:
         raw = message.content[0].text.strip()
         return _parse_claude_summary(raw)
     except Exception as e:
-        print(f"[WARN] Claude summary failed: {e}", file=sys.stderr)
+        print(f"[WARN] Claude summary failed ({type(e).__name__}): {e}", file=sys.stderr)
         return None
 
 
