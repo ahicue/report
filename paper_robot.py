@@ -474,10 +474,13 @@ _SUMMARY_PROMPT = """\
 def _claude_summary(title: str, abstract: str) -> dict | None:
     """Call Claude API to generate a structured Chinese summary. Returns None on failure."""
     if not _ANTHROPIC_AVAILABLE:
+        print("[Claude] anthropic package not installed", file=sys.stderr)
         return None
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
+        print("[Claude] ANTHROPIC_API_KEY not set — using template fallback", file=sys.stderr)
         return None
+    print(f"[Claude] API key found (sk-ant-...{api_key[-4:]}), calling Haiku...", file=sys.stderr)
     try:
         client = _anthropic.Anthropic(api_key=api_key)
         prompt = _SUMMARY_PROMPT.replace("{title}", title).replace("{abstract}", abstract)
