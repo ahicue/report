@@ -1,23 +1,24 @@
 {
   "queries": [
     {
-      "name": "Environment + Input-Output",
-      "search": "environmental economics input-output table emissions supply chain",
-      "max_results": 25
+      "name": "Environmental Econometrics",
+      "search": "environmental economics spatial econometric panel data difference-in-differences instrumental variable emissions",
+      "max_results": 100
     },
     {
-      "name": "Labor + Input-Output",
-      "search": "labor economics input-output table employment wage industrial linkage",
-      "max_results": 25
+      "name": "Labor Econometrics",
+      "search": "labor economics panel data difference-in-differences instrumental variable employment wage",
+      "max_results": 100
     },
     {
-      "name": "Urban + Input-Output",
-      "search": "urban economics input-output table city regional economy infrastructure",
-      "max_results": 25
+      "name": "Urban Spatial Econometrics",
+      "search": "urban economics spatial econometric panel data city regional housing transportation",
+      "max_results": 100
     }
   ],
-  "fresh_days": 730,
+  "fresh_days": 3650,
   "max_posts_per_run": 1,
+  "require_input_output_keyword": false,
   "minimum_summary_chars": 400,
   "minimum_abstract_length": 250,
   "request_pause_seconds": 1,
@@ -59,15 +60,54 @@
     "multi-regional input-output",
     "Leontief"
   ],
+  "econometric_keywords": [
+    "spatial econometric",
+    "spatial econometrics",
+    "spatial durbin",
+    "spatial lag",
+    "spatial error",
+    "panel data",
+    "fixed effects",
+    "difference-in-differences",
+    "DID",
+    "instrumental variable",
+    "IV",
+    "regression discontinuity",
+    "synthetic control"
+  ],
+  "strict_input_output_keywords": [
+    "input-output table",
+    "input-output tables",
+    "input-output model",
+    "input-output modelling",
+    "input-output modeling",
+    "input-output analysis",
+    "input-output framework",
+    "input output table",
+    "input output tables",
+    "multi-regional input-output",
+    "multiregional input-output",
+    "MRIO",
+    "Leontief"
+  ],
   "method_keywords": [
+    "spatial econometric",
+    "spatial econometrics",
+    "spatial durbin",
+    "spatial lag",
+    "spatial error",
+    "panel data",
+    "fixed effects",
+    "difference-in-differences",
+    "DID",
+    "instrumental variable",
+    "IV",
+    "regression discontinuity",
+    "synthetic control",
     "input-output",
     "multi-regional input-output",
     "structural decomposition",
     "decomposition",
-    "difference-in-differences",
-    "instrumental variable",
-    "panel data",
-    "spatial econometric",
     "general equilibrium",
     "counterfactual"
   ],

@@ -14,6 +14,12 @@ import time
 import urllib.parse
 import urllib.request
 
+try:
+    import anthropic as _anthropic
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    _ANTHROPIC_AVAILABLE = False
+
 
 OPENALEX_API = "https://api.openalex.org/works"
 DEFAULT_SEEN_PATH = pathlib.Path("data/seen.json")
@@ -27,7 +33,11 @@ def load_dotenv(path: pathlib.Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        k = key.strip()
+        v = value.strip().strip('"').strip("'")
+        # Always override if the env var is unset or empty (handles Claude Code's empty ANTHROPIC_API_KEY)
+        if not os.environ.get(k):
+            os.environ[k] = v
 
 
 def read_json(path: pathlib.Path) -> dict:
@@ -44,7 +54,7 @@ def load_seen(path: pathlib.Path) -> set[str]:
 
 def save_seen(path: pathlib.Path, seen: set[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"ids": sorted(seen), "updated_at": dt.datetime.now(dt.UTC).isoformat()}
+    payload = {"ids": sorted(seen), "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()}
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -74,8 +84,8 @@ def normalize_text(value: str) -> str:
 
 def parse_date(value: str | None) -> dt.datetime:
     if not value:
-        return dt.datetime(1900, 1, 1, tzinfo=dt.UTC)
-    return dt.datetime.fromisoformat(value).replace(tzinfo=dt.UTC)
+        return dt.datetime(1900, 1, 1, tzinfo=dt.timezone.utc)
+    return dt.datetime.fromisoformat(value).replace(tzinfo=dt.timezone.utc)
 
 
 def source_name(work: dict) -> str:
@@ -123,12 +133,26 @@ def keyword_score(text: str, keywords: list[str]) -> int:
     return sum(1 for keyword in keywords if keyword.casefold() in lowered)
 
 
+def has_strict_input_output_signal(text: str, keywords: list[str]) -> bool:
+    lowered = text.casefold()
+    for keyword in keywords:
+        keyword_lower = keyword.casefold()
+        if keyword_lower in {"mrio", "leontief"}:
+            if re.search(rf"\b{re.escape(keyword_lower)}\b", lowered):
+                return True
+            continue
+        if keyword_lower in lowered:
+            return True
+    return False
+
+
 def score_work(work: dict, config: dict, query_name: str) -> int:
     title = work.get("display_name") or ""
     abstract = reconstruct_abstract(work.get("abstract_inverted_index"))
     haystack = f"{title} {abstract} {source_name(work)} {publisher_name(work)}"
     score = 0
-    score += 8 * keyword_score(haystack, config.get("input_output_keywords", []))
+    score += 9 * keyword_score(haystack, config.get("econometric_keywords", []))
+    score += 2 * keyword_score(haystack, config.get("input_output_keywords", []))
     score += 3 * keyword_score(haystack, config.get("core_keywords", []))
     score += 2 * keyword_score(haystack, config.get("field_keywords", []))
     score += 1 if query_name.casefold() in haystack.casefold() else 0
@@ -164,10 +188,15 @@ def fetch_openalex_papers(query: dict, config: dict) -> list[dict]:
         abstract = normalize_text(reconstruct_abstract(work.get("abstract_inverted_index")))
         if len(abstract) < int(config.get("minimum_abstract_length", 250)):
             continue
+        title = normalize_text(work.get("display_name") or "")
+        if config.get("require_input_output_keyword", True):
+            io_haystack = f"{title} {abstract}"
+            if not has_strict_input_output_signal(io_haystack, config.get("strict_input_output_keywords", [])):
+                continue
         journal = source_name(work)
         paper = {
             "id": work.get("id") or doi_url(work),
-            "title": normalize_text(work.get("display_name") or ""),
+            "title": title,
             "abstract": abstract,
             "url": doi_url(work),
             "authors": authors_of(work),
@@ -222,6 +251,17 @@ def first_matching_sentence(sentences: list[str], keywords: list[str], fallback_
     return sentences[min(fallback_index, len(sentences) - 1)]
 
 
+def first_context_sentence(sentences: list[str]) -> str:
+    purpose_markers = ["aim", "objective", "purpose", "this paper", "this study", "we examine", "we estimate"]
+    method_markers = ["method", "using", "apply", "model", "regression", "input-output"]
+    for sentence in sentences:
+        lowered = sentence.casefold()
+        if any(marker in lowered for marker in purpose_markers + method_markers):
+            continue
+        return sentence
+    return sentences[0] if sentences else "Abstract unavailable."
+
+
 def summarize_paper(paper: dict, config: dict) -> dict:
     sections = structured_sections(paper["abstract"])
     summary_text = " ".join(sections.values()) if sections else paper["abstract"]
@@ -230,9 +270,7 @@ def summarize_paper(paper: dict, config: dict) -> dict:
     io_terms = config.get("input_output_keywords", [])
     originality_terms = ["new", "novel", "first", "contribute", "propose", "develop", "introduce"]
     conclusion_terms = ["find", "show", "result", "suggest", "indicate", "reveal"]
-    background = section_value(sections, ["background"]) or first_matching_sentence(
-        sentences, config.get("field_keywords", []), 0
-    )
+    background = section_value(sections, ["background"]) or first_context_sentence(sentences)
     purpose = section_value(sections, ["objective", "objectives", "purpose"]) or first_matching_sentence(
         sentences, ["aim", "study", "examine", "assess", "investigate", "objective"], 1
     )
@@ -282,20 +320,32 @@ def chinese_publisher(publisher: str) -> str:
 
 def method_label(text: str) -> str:
     lowered = text.casefold()
+    if "spatial durbin" in lowered:
+        return "空间杜宾模型"
+    if "spatial lag" in lowered:
+        return "空间滞后模型"
+    if "spatial error" in lowered:
+        return "空间误差模型"
+    if "spatial econometric" in lowered or "spatial econometrics" in lowered:
+        return "空间计量模型"
+    if "difference-in-differences" in lowered or re.search(r"\bdid\b", lowered):
+        return "双重差分"
+    if "instrumental variable" in lowered or re.search(r"\biv\b", lowered):
+        return "工具变量"
+    if "fixed effects" in lowered:
+        return "固定效应面板模型"
+    if "panel" in lowered:
+        return "面板数据模型"
+    if "regression discontinuity" in lowered:
+        return "断点回归"
+    if "synthetic control" in lowered:
+        return "合成控制法"
     if "multi-regional input-output" in lowered or "mrio" in lowered:
         return "多区域投入产出表（MRIO）"
     if "input-output" in lowered or "input output" in lowered or "leontief" in lowered:
         return "投入产出表/Leontief 乘数分析"
     if "decomposition" in lowered:
         return "结构分解或因素分解"
-    if "difference-in-differences" in lowered:
-        return "双重差分"
-    if "instrumental variable" in lowered:
-        return "工具变量"
-    if "panel" in lowered:
-        return "面板数据模型"
-    if "spatial" in lowered:
-        return "空间计量模型"
     return "摘要中的实证或模型方法"
 
 
@@ -326,58 +376,185 @@ def finding_label(text: str) -> str:
     return "论文重点报告了" + "、".join(effects) + "方面的影响"
 
 
+def concise_evidence(text: str, limit: int = 220) -> str:
+    text = normalize_text(text)
+    if not text or text == "Abstract unavailable.":
+        return "摘要没有提供足够细节，需要进一步查看全文确认。"
+    return trim(text, limit)
+
+
+def research_object(title: str) -> str:
+    title = normalize_text(title)
+    match = re.search(r"effects? of (.+?)(?: using |:|$)", title, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"assessment of (.+?)(?: using |:|$)", title, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return title
+
+
+def region_label(text: str) -> str:
+    regions = [
+        "ASEAN",
+        "China",
+        "Japan",
+        "Korea",
+        "Indonesia",
+        "Malaysia",
+        "Philippines",
+        "Thailand",
+        "Vietnam",
+        "India",
+        "United States",
+        "U.S.",
+        "EU",
+        "European Union",
+        "Europe",
+        "Poland",
+        "Serbia",
+        "Brazil",
+        "Africa",
+        "Latin America",
+        "OECD",
+    ]
+    lowered = text.casefold()
+    for region in regions:
+        if region.casefold() in lowered:
+            return region
+    return "论文所覆盖的地区或样本国家"
+
+
+def object_label(title: str) -> str:
+    title = normalize_text(title)
+    patterns = [
+        r"impact of (.+?)(?: via | using | in | on |:|$)",
+        r"effects? of (.+?) in ",
+        r"effects? of (.+?) on ",
+        r"role of (.+?) in ",
+        r"assessment of (.+?) in ",
+        r"analysis of (.+?) in ",
+        r"forecasting in (.+?) using ",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, title, flags=re.IGNORECASE)
+        if match:
+            return normalize_text(match.group(1))
+    if ":" in title:
+        subtitle = title.split(":", 1)[1]
+        return normalize_text(re.sub(r"^(quantifying|assessing|analyzing|measuring)\s+", "", subtitle, flags=re.IGNORECASE))
+    obj = research_object(title)
+    return obj
+
+
+_SUMMARY_PROMPT = """\
+你是一位经济学文献助理，专门面向环境经济、劳动经济、城市与区域经济方向的研究者。
+请根据下方论文信息，用中文写一篇结构化总结。总结要基于摘要的实际内容，不能套用通用模板。
+
+《论文标题》
+{title}
+
+《英文摘要》
+{abstract}
+
+请严格按以下五个字段输出，每个字段一段，不要输出字段名以外的任何多余标题或说明：
+
+研究背景：先说明研究对象是什么（具体是哪个国家/地区、哪个经济现象或政策问题），再说明要研究的核心问题是什么，然后解释这个问题为什么有研究必要性（现实重要性或政策意义），最后说明先行研究已经做了哪些相关工作、还存在哪些不足或空白——这部分必须来自摘要的实际信息，不能用通用套话代替。
+
+研究目的：从摘要中提炼具体的研究目标，说清楚作者想回答什么问题、针对什么对象、衡量什么结果。
+
+独创性：基于摘要内容，说明本文相对先行研究的主要贡献，例如新数据、新方法、新研究对象、更强的识别策略，或填补了某个先前未被研究的空白。
+
+研究手法：具体说明使用了哪种计量或分析方法（例如空间计量、DID、IV、面板固定效应、投入产出分析等），以及数据来源和样本范围（如果摘要有提及）。
+
+主要结论：用具体数字或具体方向性结论总结核心发现，不要用泛泛的“研究表明有显著影响”代替。如果摘要本身没有具体数字，提炼结论的方向和政策含义。
+"""
+
+
+def _claude_summary(title: str, abstract: str) -> dict | None:
+    """Call Claude API to generate a structured Chinese summary. Returns None on failure."""
+    if not _ANTHROPIC_AVAILABLE:
+        return None
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        client = _anthropic.Anthropic(api_key=api_key)
+        prompt = _SUMMARY_PROMPT.format(title=title, abstract=abstract)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        return _parse_claude_summary(raw)
+    except Exception as e:
+        print(f"[WARN] Claude summary failed: {e}", file=sys.stderr)
+        return None
+
+
+def _parse_claude_summary(text: str) -> dict:
+    """Parse Claude five-section output into a dict."""
+    keys = {
+        "研究背景": "background",
+        "研究目的": "purpose",
+        "独创性": "originality",
+        "研究手法": "method",
+        "主要结论": "findings",
+    }
+    result = {v: "" for v in keys.values()}
+    current_key = None
+    buffer = []
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        matched = False
+        for label, field in keys.items():
+            if stripped.startswith(label + "：") or stripped.startswith(label + ":"):
+                if current_key and buffer:
+                    result[current_key] = " ".join(buffer).strip()
+                current_key = field
+                after_colon = re.split(r"[：:]", stripped, maxsplit=1)[1].strip()
+                buffer = [after_colon] if after_colon else []
+                matched = True
+                break
+        if not matched and current_key and stripped:
+            buffer.append(stripped)
+
+    if current_key and buffer:
+        result[current_key] = " ".join(buffer).strip()
+
+    return result
+
+
 def chinese_summary(paper: dict, config: dict) -> dict:
+    # Try Claude first
+    claude_result = _claude_summary(paper["title"], paper["abstract"])
+    if claude_result and all(claude_result.values()):
+        return claude_result
+
+    # Fallback: rule-based templates
     raw = summarize_paper(paper, config)
-    joined = " ".join(raw.values())
+    joined = f"{paper['title']} {paper['abstract']} {' '.join(raw.values())}"
     field = field_label(joined, paper["query_name"])
     method = method_label(raw["method"])
     finding = finding_label(raw["findings"])
-    io_focus = "投入产出表、产业关联或供应链传导机制" if method.startswith("投入产出") or "MRIO" in method else "经济机制识别"
+    obj = object_label(paper["title"])
+    region = region_label(joined)
     return {
         "background": (
-            f"这篇论文处在{field}的研究脉络中，核心问题不是单个部门或单项政策的孤立效果，"
-            "而是经济活动如何沿着部门投入、供应链关系和区域结构继续扩散。"
-            f"从题目《{paper['title']}》来看，论文特别适合用来观察产业联系、公共政策或区域发展"
-            "如何影响就业、产出、增加值、环境压力或城市体系等结果。"
+            f"这篇论文的研究对象是{region}的「{obj}」，属于{field}领域。"
+            f"核心问题是{obj}对经济结构、就业、环境或区域发展的影响。"
+            "先行研究对相关议题已有讨论，但在因果识别和间接效应刷画上仍有不足。"
         ),
-        "purpose": (
-            "研究目的可以概括为：在一个可量化的经济系统中识别研究对象的直接影响和间接影响，"
-            "并说明这些影响为什么会通过部门之间的购买、销售、生产配套或空间联系被放大或重新分配。"
-            "换句话说，它不只是回答“有没有影响”，还试图回答影响发生在哪些部门、通过什么路径传导、"
-            "以及这些结果对政策评估或产业选择意味着什么。"
-        ),
-        "originality": (
-            f"独创性主要在于把问题放到{io_focus}中讨论。相比只看局部样本或单一结果变量，"
-            "这种视角能把直接效应、上游供应链效应、下游需求效应和区域间溢出放在同一框架下衡量。"
-            "如果论文使用的是投入产出表或 MRIO，它的价值尤其在于能把宏观总量、部门结构和政策含义连接起来，"
-            "让读者看到某一部门或地区变化背后的系统性连锁反应。"
-        ),
-        "method": (
-            f"研究手法以{method}为核心，并结合论文摘要中的数据设定估计直接、间接或总体经济效应。"
-            "这类方法通常会先定义部门之间的投入和产出关系，再计算需求变化、政策冲击或部门扩张带来的乘数效应。"
-            "如果数据允许，还可以进一步拆分就业、收入、增加值、碳排放或区域流向，从而判断哪些部门是关键传导节点，"
-            "哪些结果只是表面相关，哪些结果具有更强的结构性解释力。"
-        ),
-        "findings": (
-            f"结论部分显示，{finding}。对研究者来说，这类发现的意义在于它能帮助判断政策收益是否只停留在目标部门，"
-            "还是会通过供应链和区域网络产生更广泛的经济后果。对政策制定者来说，它也能提示资源应该投向哪里："
-            "是优先支持乘数更高的部门，还是关注就业、环境和区域公平之间的权衡。整体来看，这篇论文更适合作为"
-            "理解经济结构传导机制的材料，而不只是作为一个单独案例阅读。"
-        ),
+        "purpose": f"以{region}为对象，评估「{obj}」在经济系统中的作用及其影响渠道。",
+        "originality": f"相对先行研究，本文在计量识别或研究对象上有所创新。",
+        "method": f"研究手法以{method}为核心。",
+        "findings": f"结论部分显示，{finding}。",
     }
 
-
 def ensure_minimum_summary(description: str, minimum_chars: int) -> str:
-    if len(description) >= minimum_chars:
-        return description
-    supplement = (
-        "\n**补充解读**: 从论文筛选角度看，这篇文章之所以值得推送，是因为它与投入产出表、"
-        "产业关联或区域经济传导问题存在明确联系。阅读时可以重点关注三个层面：第一，作者如何定义"
-        "冲击或研究对象；第二，部门之间的中间投入关系如何改变最终估计结果；第三，论文是否把产出、"
-        "就业、环境或空间分布等结果放在同一个经济系统里解释。这些信息有助于判断论文是否能为你后续"
-        "做环境、劳动、城市或区域经济研究提供可复用的方法。"
-    )
-    return description + supplement
+    return description
 
 
 def trim(text: str, limit: int) -> str:
@@ -385,6 +562,18 @@ def trim(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "..."
+
+
+def forum_thread_name(title: str) -> str:
+    cleaned = re.sub(r"[\r\n\t]+", " ", title)
+    cleaned = re.sub(r"[@#:`*_~|<>\\[\\]{}]+", "", cleaned)
+    cleaned = normalize_text(cleaned)
+    return trim(cleaned or "Economics paper", 90)
+
+
+def forum_tag_ids() -> list[str]:
+    raw = os.environ.get("DISCORD_FORUM_TAG_IDS", "")
+    return [tag.strip() for tag in raw.split(",") if tag.strip()]
 
 
 def format_authors(authors: list[str]) -> str:
@@ -407,7 +596,7 @@ def discord_payload(paper: dict, config: dict) -> dict:
         f"**结论总结**: {summary['findings']}"
     )
     description = ensure_minimum_summary(description, int(config.get("minimum_summary_chars", 400)))
-    return {
+    payload = {
         "embeds": [
             {
                 "title": trim(paper["title"], 250),
@@ -426,22 +615,29 @@ def discord_payload(paper: dict, config: dict) -> dict:
             }
         ]
     }
+    if os.environ.get("DISCORD_FORUM_POSTS", "").casefold() in {"1", "true", "yes", "on"}:
+        payload["thread_name"] = forum_thread_name(paper["title"])
+        tags = forum_tag_ids()
+        if tags:
+            payload["applied_tags"] = tags
+    return payload
 
 
 def post_to_discord(webhook_url: str, payload: dict, dry_run: bool) -> None:
     if dry_run:
         print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
         return
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        webhook_url,
-        data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "economics-paper-robot/0.2"},
-        method="POST",
+    import subprocess
+    result = subprocess.run(
+        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+         "-X", "POST", webhook_url,
+         "-H", "Content-Type: application/json",
+         "-d", json.dumps(payload)],
+        capture_output=True, text=True, timeout=30,
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        if response.status >= 300:
-            raise RuntimeError(f"Discord webhook failed with status {response.status}")
+    status = result.stdout.strip()
+    if status not in ("200", "204"):
+        raise RuntimeError(f"Discord webhook failed with status {status}: {result.stderr}")
 
 
 def collect_new_papers(config: dict, seen: set[str]) -> list[dict]:

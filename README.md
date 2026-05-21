@@ -80,6 +80,24 @@ python3 discord_listener.py --config config.json
 
 When someone sends exactly `继续`, the listener pushes the next paper through the existing Discord webhook and replies with a short status message.
 
+## Discord Forum Channel
+
+To post papers into a Discord Forum channel, create or move the webhook so it belongs to the Forum channel, then set:
+
+```bash
+DISCORD_FORUM_POSTS=true
+```
+
+Each paper will create a new forum post. The forum post title is generated from the paper title.
+
+If the Forum channel requires tags, add the tag IDs as a comma-separated list:
+
+```bash
+DISCORD_FORUM_TAG_IDS=123456789012345678,234567890123456789
+```
+
+Discord requires `thread_name` or `thread_id` when executing a webhook in a Forum or Media channel. This robot uses `thread_name` to create one new forum thread per paper.
+
 ## Schedule
 
 The GitHub Actions workflow runs every 30 minutes from 08:00 to 20:00 Asia/Tokyo, pushing one paper per run.
